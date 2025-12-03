@@ -30,28 +30,28 @@ directory.
 ## Installation and Setup
 
 Ensure ROS is installed. Install dependencies:
-```
+```bash
 sudo apt install libeigen3-dev ros-noetic-eigenpy ros-noetic-hpp-fcl ros-noetic-pinocchio
 ```
 Ensure that you also modify `$PYTHONPATH` to include the location of
 Pinocchio's Python bindings. Typically, this would be something like
-```
+```plaintext
 /opt/ros/noetic/lib/python3.8/site-packages
 ```
 
 Clone this repository into the catkin workspace:
-```
+```bash
 cd catkin_ws/src
 git clone https://github.com/utiasDSL/mobile_manipulation_central mobile_manipulation_central
 ```
 
 Install Python dependencies:
-```
+```bash
 python3 -m pip install -r requirements.txt
 ```
 
 Build the workspace:
-```
+```bash
 catkin build
 ```
 
@@ -68,17 +68,17 @@ workspace:
 The ROS master node runs onboard the Ridgeback computer and is started
 automatically when the Ridgeback is turned on. You need to tell your laptop
 where to reach the ROS master. First, add to `/etc/hosts`:
-```
+```plaintext
 192.168.131.1 cpr-tor11-01
 ```
 Then, in each terminal where you want to connect to the robot over ROS, run
-```
+```bash
 export ROS_IP=192.168.131.100
 export ROS_MASTER_URI=http://cpr-tor11-01:11311
 ```
 To revert back to default settings (so you can run ROS locally, for example),
 do:
-```
+```bash
 export ROS_MASTER_URI=http://localhost:11311
 unset ROS_IP
 unset ROS_HOSTNAME
@@ -93,10 +93,18 @@ blank. Once done, you should be able to ping the robot at `192.168.131.1`.
 
 ## Usage
 
+URDF files of the robots are used for kinematics and simulation. Compile the
+xacro files to produce the URDFs:
+
+```bash
+cd mobile_manipulation_central/urdf
+./compile_xacro.sh
+```
+
 One of the main goals of this repo is to facilitate easy development over ROS.
 We provide ROS interfaces for the base, arm, and combined mobile manipulator
 system (`src/mobile_manipulation_central/ros_interface.py`) which provide a
-standard API to communicate with the robot over ROS. Theses interfaces can be
+standard API to communicate with the robot over ROS. These interfaces can be
 used seamlessly with real hardware or a simulated version of the robot
 (`src/mobile_manipulation_central/simulation_ros_interface.py`).
 
@@ -122,19 +130,19 @@ Vicon is used to track the base position as well as any other objects in the
 scene. You must be connected to the `DSL_DroneNet_5G` network.
 
 Start the Vicon bridge, UR10 driver, and gripper driver:
-```
+```bash
 roslaunch mobile_manipulation_central thing.launch
 ```
 To stream commands to the UR10, you must start the onboard program.
 
 Interaction with the robot is primarily done using the feedback topics (of type
 `sensor_msgs/JointState`):
-```
+```plaintext
 /ridgeback/joint_states
 /ur10/joint_states
 ```
 and the velocity command topics
-```
+```plaintext
 /ridgeback/cmd_vel  # geometry_msgs/Twist
 /ur10/cmd_vel       # std_msgs/Float64MultiArray
 ```
@@ -206,7 +214,7 @@ the color. The main ones are:
   subscribes or publishes to the `cmd_vel` topic. This appears to be due to
   [this line](https://github.com/ridgeback/ridgeback/blob/melodic-devel/ridgeback_control/src/mecanum_drive_controller.cpp#L281).
 * Start or stop a particular `ros_control` controller using:
-  ```
+  ```bash
   rosrun controller_manager controller_manager start <controller_name>
   rosrun controller_manager controller_manager stop <controller_name>
   ```
@@ -223,7 +231,7 @@ the color. The main ones are:
 ### Check Ridgeback battery voltage
 Ensure you have `diagnostics_msgs` installed (`sudo apt install
 ros-noetic-diagnostic-msgs`). Then:
-```
+```bash
 rosrun mobile_manipulation_central battery_voltage.py
 ```
 Battery voltage should be between 22V (very low charge) and 27.6V (recently
@@ -245,11 +253,11 @@ If the voltage is approaching 22V, stop experiments and plug in the robot.
 * Occasionally when starting the robot the connection to the UR10 cannot be
   made. The `ur_robot_driver` node (launched as part of `thing.launch`) will
   complain with something along the lines of
-  ```
+  ```plaintext
   could not connect to robot at address 192.168.131.40
   ```
   You can test for this explicitly by trying to ping the arm:
-  ```
+  ```bash
   ping 192.168.131.40
   ```
   which will say that the host in unreachable. This can be fixed by unplugging
@@ -264,7 +272,7 @@ If the voltage is approaching 22V, stop experiments and plug in the robot.
 * Similar to the above, it is possible that the connection from the laptop to
   the Ridgeback will also not be available, despite the base (and possibly the
   arm) appearing to be powered on normally. However, this seems to be quite
-  rare. Restarting the base eventually resolves the problem. 
+  rare. Restarting the base eventually resolves the problem.
 * Occasionally after starting the arm, one may get protective stops after every
   small movement of the arm, due to base deviation from desired path. So far,
   it appears that restarting the arm resolved the problem.

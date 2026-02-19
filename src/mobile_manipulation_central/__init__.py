@@ -19,3 +19,11 @@ from .smoothing import ExponentialSmoother
 from .simulation import BulletSimulation, BulletSimulatedRobot
 from .ros_logging import BAG_DIR, DataRecorder, ViconRateChecker
 from .utils import wrap_to_pi, load_home_position, load_pkg_config
+
+def bound_array(a, lb=None, ub=None):
+    """Elementwise bound array above and below."""
+    if lb is not None:
+        a = np.maximum(a, lb)
+    if ub is not None:
+        a = np.minimum(a, ub)
+    return a

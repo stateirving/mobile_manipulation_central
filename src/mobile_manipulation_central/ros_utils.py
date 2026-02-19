@@ -6,6 +6,7 @@ from spatialmath import UnitQuaternion
 from spatialmath.base import qslerp
 import xacro
 import rospkg
+from rclpy.time import Time
 
 
 UR10_JOINT_NAMES = [
@@ -24,7 +25,7 @@ UR10_JOINT_INDEX_MAP = {name: index for index, name in enumerate(UR10_JOINT_NAME
 
 def msg_time(msg):
     """Extract message timestamp as float in seconds."""
-    return msg.header.stamp.to_sec()
+    return Time.from_msg(msg.header.stamp).nanoseconds / 1e9
 
 
 def parse_time(msgs, normalize_time=True, t0=None):

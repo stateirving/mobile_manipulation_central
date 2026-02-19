@@ -1,28 +1,76 @@
 import time
 import signal
+import threading
 
 import numpy as np
-import rospy
+import rclpy
+from rclpy.node import Node
 
 from spatialmath.base import rotz
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, Joy
 from geometry_msgs.msg import TransformStamped
 
 from mobile_manipulation_central import ros_utils
 
 
 # TODO add protections if time since last message is too large
+class JoystickButtonInterface:
+    """
+        Monitor on joy stick button. Flag event when the button is pressed. Event flag can only be cleared externally.
+    """
+
+    def __init__(self, node: Node, button_index):
+        self.button_index = button_index
+        self.button = 0             # 1 pressed, 0 available
+        self.busy = False
+        self.button_lock = threading.Lock()
+        self.block_out_time = 0.5 # 0.5 second
+        self.node = node
+        self.last_reset_time = node.get_clock().now().nanoseconds / 1e9
+
+        self.msg_received = False
+        self.joy_sub = node.create_subscription(Joy, "/bluetooth_teleop/joy", self._joy_cb, 10)
+
+
+    def _joy_cb(self, msg):
+        if msg.buttons[self.button_index] == 1:
+            self._update_button(1)
+            print("set button {}".format(self.button))
+
+
+        self.msg_received = True
+
+    def reset_button(self):
+        self._update_button(0, True)
+        print("reset button {}".format(self.button))
+        self.last_reset_time = self.node.get_clock().now().nanoseconds / 1e9
+
+
+    def _update_button(self, value, force=False):
+        t_now = self.node.get_clock().now().nanoseconds / 1e9
+        if t_now - self.last_reset_time > self.block_out_time or force:
+            if value != self.button:
+                self.button_lock.acquire()
+                self.button = value
+                print("update button {}".format(self.button))
+
+                self.button_lock.release()
+
+    def ready(self):
+        """True if a joy message has been received."""
+        return self.msg_received
 
 
 class ViconObjectInterface:
-    """ROS interface for receiving Vicon measurements for an object's pose."""
+    """ROS2 interface for receiving Vicon measurements for an object's pose."""
 
-    def __init__(self, name):
+    def __init__(self, node: Node, name):
         topic = "/vicon/" + name + "/" + name
         self.msg_received = False
-        self.sub = rospy.Subscriber(topic, TransformStamped, self._transform_cb)
+        self.node = node
+        self.sub = node.create_subscription(TransformStamped, topic, self._transform_cb, 1)
 
     def ready(self):
         """True if a Vicon message has been received."""
@@ -40,9 +88,10 @@ class ViconObjectInterface:
 
 # TODO make abstract
 class RobotROSInterface:
-    """Base class for defining ROS interfaces for robots."""
+    """Base class for defining ROS2 interfaces for robots."""
 
-    def __init__(self, nq, nv):
+    def __init__(self, node: Node, nq, nv):
+        self.node = node
         self.nq = nq
         self.nv = nv
 
@@ -61,18 +110,19 @@ class RobotROSInterface:
 
 
 class RidgebackROSInterface(RobotROSInterface):
-    """ROS interface for the Ridgeback mobile base."""
+    """ROS2 interface for the Ridgeback mobile base."""
 
-    def __init__(self):
-        super().__init__(nq=3, nv=3)
+    def __init__(self, node: Node):
+        super().__init__(node=node, nq=3, nv=3)
 
-        self.cmd_pub = rospy.Publisher("/ridgeback/cmd_vel", Twist, queue_size=1)
-        self.joint_state_sub = rospy.Subscriber(
-            "/ridgeback/joint_states", JointState, self._joint_state_cb
+        self.cmd_pub = node.create_publisher(Twist, "/ridgeback/cmd_vel", 1)
+        self.joint_state_sub = node.create_subscription(
+            JointState, "/ridgeback/joint_states", self._joint_state_cb, 1
         )
 
     def _joint_state_cb(self, msg):
         """Callback for Ridgeback joint feedback."""
+        print("Received Ridgeback joint state message.", flush=True)
         self.q = np.array(msg.position)
         self.v = np.array(msg.velocity)
 
@@ -99,18 +149,19 @@ class RidgebackROSInterface(RobotROSInterface):
 
 
 class UR10ROSInterface(RobotROSInterface):
-    """ROS interface for the UR10 arm."""
+    """ROS2 interface for the UR10 arm."""
 
-    def __init__(self):
-        super().__init__(nq=6, nv=6)
+    def __init__(self, node: Node):
+        super().__init__(node=node, nq=6, nv=6)
 
-        self.cmd_pub = rospy.Publisher("/ur10/cmd_vel", Float64MultiArray, queue_size=1)
-        self.joint_state_sub = rospy.Subscriber(
-            "/ur10/joint_states", JointState, self._joint_state_cb
+        self.cmd_pub = node.create_publisher(Float64MultiArray, "/ur10/cmd_vel", 1)
+        self.joint_state_sub = node.create_subscription(
+            JointState, "/ur10/joint_states", self._joint_state_cb, 1
         )
 
     def _joint_state_cb(self, msg):
         """Callback for arm joint feedback."""
+        print("Received UR10 joint state message.", flush=True)
         _, self.q, self.v = ros_utils.parse_ur10_joint_state_msg(msg)
         self.joint_states_received = True
 
@@ -128,11 +179,12 @@ class UR10ROSInterface(RobotROSInterface):
 
 
 class MobileManipulatorROSInterface:
-    """ROS interface to the real mobile manipulator."""
+    """ROS2 interface to the real mobile manipulator."""
 
-    def __init__(self):
-        self.arm = UR10ROSInterface()
-        self.base = RidgebackROSInterface()
+    def __init__(self, node: Node):
+        self.node = node
+        self.arm = UR10ROSInterface(node)
+        self.base = RidgebackROSInterface(node)
 
         self.nq = self.arm.nq + self.base.nq
         self.nv = self.arm.nv + self.base.nv
@@ -144,6 +196,7 @@ class MobileManipulatorROSInterface:
 
     def ready(self):
         """True if joint state messages have been received for both arm and base."""
+        print(f"Base ready: {self.base.ready()}, Arm ready: {self.arm.ready()}", flush=True)
         return self.base.ready() and self.arm.ready()
 
     def publish_cmd_vel(self, cmd_vel, bodyframe=False):
@@ -175,7 +228,7 @@ class MobileManipulatorROSInterface:
 # usually this occurs in rospy.impl.registration.RegManager.cleanup, in the
 # call to `multi`
 class RobotSignalHandler:
-    """Custom signal handler to brake the robot before shutting down ROS."""
+    """Custom signal handler to brake the robot before shutting down ROS2."""
 
     def __init__(self, robot, dry_run=False):
         self.robot = robot
@@ -189,7 +242,7 @@ class RobotSignalHandler:
             print("Braking robot.")
             self.robot.brake()
             time.sleep(0.1)  # TODO necessary?
-        rospy.signal_shutdown("Caught SIGINT!")
+        rclpy.shutdown()
 
 
 class SimpleSignalHandler:

@@ -1,6 +1,6 @@
 import math
 import numpy as np
-import rospkg
+from ament_index_python.packages import get_package_share_directory
 import yaml
 from pathlib import Path
 
@@ -17,8 +17,7 @@ def load_home_position(name="default", path=None):
     this repo.
     """
     if path is None:
-        rospack = rospkg.RosPack()
-        pkg_path = Path(rospack.get_path("mobile_manipulation_central"))
+        pkg_path = Path(get_package_share_directory("mobile_manipulation_central"))
         path = pkg_path / "config" / "home.yaml"
 
     with open(path) as f:
@@ -41,8 +40,7 @@ def load_pkg_config(pkg_name, relpath):
     : dict
         The configuration.
     """
-    rospack = rospkg.RosPack()
-    pkg_path = Path(rospack.get_path(pkg_name))
+    pkg_path = Path(get_package_share_directory(pkg_name))
     path = pkg_path / relpath
     with open(path) as f:
         return yaml.safe_load(f)

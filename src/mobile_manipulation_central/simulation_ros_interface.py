@@ -1,4 +1,5 @@
-import rospy
+from rclpy.node import Node
+from builtin_interfaces.msg import Time
 import numpy as np
 
 from std_msgs.msg import Float64MultiArray
@@ -10,18 +11,19 @@ from mobile_manipulation_central.ros_utils import UR10_JOINT_NAMES
 
 
 class SimulatedViconObjectInterface:
-    """Simulation of the Vicon ROS end point for a detected object.
+    """Simulation of the Vicon ROS2 end point for a detected object.
 
     This is intended to be instantiated from a simulation environment to
     publish data in the same manner as Vicon would do in the real world.
     """
 
-    def __init__(self, name):
+    def __init__(self, node: Node, name):
         topic = "/vicon/" + name + "/" + name
-        self.pub = rospy.Publisher(topic, TransformStamped, queue_size=1)
-        self.ground_truth_pub = rospy.Publisher(
-            "/projectile/true_joint_states", JointState, queue_size=1
+        self.pub = node.create_publisher(TransformStamped, topic, 1)
+        self.ground_truth_pub = node.create_publisher(
+            JointState, "/projectile/true_joint_states", 1
         )
+        self.node = node
 
     def publish_pose(self, t, r, Q):
         """Publish the object's pose at time t, consisting of position r and
@@ -29,7 +31,10 @@ class SimulatedViconObjectInterface:
 
         Note that the order of Q is [x, y, z, w]."""
         msg = TransformStamped()
-        msg.header.stamp = rospy.Time(t)
+        # Convert simulation time (float seconds) to ROS2 Time message
+        seconds = int(t)
+        nanoseconds = int((t - seconds) * 1e9)
+        msg.header.stamp = Time(sec=seconds, nanosec=nanoseconds)
 
         msg.transform.translation.x = r[0]
         msg.transform.translation.y = r[1]
@@ -48,7 +53,10 @@ class SimulatedViconObjectInterface:
         This is useful for debugging purposes: compare estimated state to this
         ground truth."""
         msg = JointState()
-        msg.header.stamp = rospy.Time(t)
+        # Convert simulation time (float seconds) to ROS2 Time message
+        seconds = int(t)
+        nanoseconds = int((t - seconds) * 1e9)
+        msg.header.stamp = Time(sec=seconds, nanosec=nanoseconds)
         msg.name = ["x", "y", "z"]
         msg.position = list(r)
         msg.velocity = list(v)
@@ -58,20 +66,21 @@ class SimulatedViconObjectInterface:
 class SimulatedRobotROSInterface:
     """Interface between the MPC node and a simulated robot.
 
-    This can be used as a generic ROS end point to simulate a robot. The idea
+    This can be used as a generic ROS2 end point to simulate a robot. The idea
     is that a simulator should instantiate this class and update it at the
     desired frequency as the simulation runs.
     """
 
-    def __init__(self, nq, nv, robot_name, joint_names):
+    def __init__(self, node: Node, nq, nv, robot_name, joint_names):
         self.cmd_vel = None
         self.nq = nq
         self.nv = nv
         self.joint_names = joint_names
+        self.node = node
 
-        self.clock_pub = rospy.Publisher("/clock", Clock, queue_size=1)
-        self.feedback_pub = rospy.Publisher(
-            robot_name + "/joint_states", JointState, queue_size=1
+        self.clock_pub = node.create_publisher(Clock, "/clock", 1)
+        self.feedback_pub = node.create_publisher(
+            JointState, robot_name + "/joint_states", 1
         )
 
     def ready(self):
@@ -82,29 +91,37 @@ class SimulatedRobotROSInterface:
         assert v.shape == (self.nv,)
 
         msg = JointState()
-        msg.header.stamp = rospy.Time(t)
+        # Convert simulation time (float seconds) to ROS2 Time message
+        seconds = int(t)
+        nanoseconds = int((t - seconds) * 1e9)
+        msg.header.stamp = Time(sec=seconds, nanosec=nanoseconds)
         msg.name = self.joint_names
-        msg.position = q
-        msg.velocity = v
+        msg.position = list(q)
+        msg.velocity = list(v)
         self.feedback_pub.publish(msg)
 
     def publish_time(self, t):
         """Publish (simulation) time."""
         msg = Clock()
-        msg.clock = rospy.Time(t)
+        # Convert simulation time (float seconds) to ROS2 Time message
+        seconds = int(t)
+        nanoseconds = int((t - seconds) * 1e9)
+        msg.clock = Time(sec=seconds, nanosec=nanoseconds)
         self.clock_pub.publish(msg)
 
 
 class SimulatedRidgebackROSInterface(SimulatedRobotROSInterface):
     """Simulated Ridgeback interface."""
 
-    def __init__(self):
+    def __init__(self, node: Node):
         robot_name = "ridgeback"
         super().__init__(
-            nq=3, nv=3, robot_name=robot_name, joint_names=["x", "y", "yaw"]
+            node=node, nq=3, nv=3, robot_name=robot_name, joint_names=["x", "y", "yaw"]
         )
 
-        self.cmd_sub = rospy.Subscriber(robot_name + "/cmd_vel", Twist, self._cmd_cb)
+        self.cmd_sub = node.create_subscription(
+            Twist, robot_name + "/cmd_vel", self._cmd_cb, 1
+        )
 
     def _cmd_cb(self, msg):
         self.cmd_vel = np.array([msg.linear.x, msg.linear.y, msg.angular.z])
@@ -113,15 +130,16 @@ class SimulatedRidgebackROSInterface(SimulatedRobotROSInterface):
 class SimulatedUR10ROSInterface(SimulatedRobotROSInterface):
     """Simulated UR10 interface."""
 
-    def __init__(self):
+    def __init__(self, node: Node):
         robot_name = "ur10"
         super().__init__(
-            nq=6, nv=6, robot_name=robot_name, joint_names=UR10_JOINT_NAMES
+            node=node, nq=6, nv=6, robot_name=robot_name, joint_names=UR10_JOINT_NAMES
         )
 
-        self.cmd_sub = rospy.Subscriber(
-            robot_name + "/cmd_vel", Float64MultiArray, self._cmd_cb
+        self.cmd_sub = node.create_subscription(
+            Float64MultiArray, robot_name + "/cmd_vel", self._cmd_cb, 1
         )
+        self.node = node
 
     def _cmd_cb(self, msg):
         self.cmd_vel = np.array(msg.data)
@@ -129,9 +147,9 @@ class SimulatedUR10ROSInterface(SimulatedRobotROSInterface):
 
 
 class SimulatedMobileManipulatorROSInterface:
-    def __init__(self):
-        self.arm = SimulatedUR10ROSInterface()
-        self.base = SimulatedRidgebackROSInterface()
+    def __init__(self, node: Node):
+        self.arm = SimulatedUR10ROSInterface(node=node)
+        self.base = SimulatedRidgebackROSInterface(node=node)
 
         self.nq = self.arm.nq + self.base.nq
         self.nv = self.arm.nv + self.base.nv
@@ -148,7 +166,7 @@ class SimulatedMobileManipulatorROSInterface:
         assert v.shape == (self.nv,)
 
         self.base.publish_feedback(t=t, q=q[: self.base.nq], v=v[: self.base.nv])
-        self.arm.publish_feedback(t=t, q=q[self.base.nq :], v=v[self.base.nq :])
+        self.arm.publish_feedback(t=t, q=q[self.base.nq :], v=v[self.base.nv :])
 
     def publish_time(self, t):
         """Publish (simulation) time."""

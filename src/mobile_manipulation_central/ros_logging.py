@@ -3,8 +3,10 @@ import os
 from pathlib import Path
 import subprocess
 import signal
+import time
 
-import rospy
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import TransformStamped
 
 from mobile_manipulation_central.ros_utils import vicon_topic_name
@@ -13,7 +15,8 @@ from mobile_manipulation_central.ros_utils import vicon_topic_name
 BAG_DIR_ENV_VAR = "MOBILE_MANIPULATION_CENTRAL_BAG_DIR"
 BAG_DIR = os.environ.get(BAG_DIR_ENV_VAR, None)
 
-ROSBAG_CMD_ROOT = ["rosbag", "record"]
+# ROS2 bag record command
+ROSBAG_CMD_ROOT = ["ros2", "bag", "record"]
 
 
 class DataRecorder:
@@ -72,15 +75,18 @@ class ViconRateChecker:
 
     Parameters
     ----------
+    node : Node
+        ROS2 node for creating subscriptions.
     vicon_object_name : str
         The name of the Vicon object of which to count the messages.
     duration : float
         Duration over which to record the messages, in seconds.
     """
 
-    def __init__(self, vicon_object_name, duration=5):
+    def __init__(self, node: Node, vicon_object_name, duration=5):
         assert duration > 0
 
+        self.node = node
         self.duration = duration
         self.msg_count = 0
         self.start_time = None
@@ -88,8 +94,8 @@ class ViconRateChecker:
         self.done = False
 
         self.topic_name = vicon_topic_name(vicon_object_name)
-        self.vicon_sub = rospy.Subscriber(
-            self.topic_name, TransformStamped, self._vicon_cb
+        self.vicon_sub = node.create_subscription(
+            TransformStamped, self.topic_name, self._vicon_cb, 1
         )
 
     def _vicon_cb(self, msg):
@@ -98,13 +104,13 @@ class ViconRateChecker:
             return
 
         # record first time a message is received
-        now = rospy.Time.now().to_sec()
+        now = self.node.get_clock().now().nanoseconds / 1e9
         if self.start_time is None:
             self.start_time = now
 
         # stop counting messages once ``self.duration`` seconds has elapsed
         if now - self.start_time > self.duration:
-            self.vicon_sub.unregister()
+            self.node.destroy_subscription(self.vicon_sub)
             self.done = True
             return
 
@@ -131,9 +137,9 @@ class ViconRateChecker:
         self.started = True
 
         # let the user know if we aren't receiving messages
-        rate = rospy.Rate(1)
-        while not self.done and not rospy.is_shutdown():
-            rate.sleep()
+        dt = 1.0  # 1 Hz check rate
+        while not self.done and rclpy.ok():
+            time.sleep(dt)
             if self.msg_count == 0:
                 print(f"I haven't received any messages on {self.topic_name}")
 

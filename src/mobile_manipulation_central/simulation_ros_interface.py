@@ -146,9 +146,36 @@ class SimulatedUR10ROSInterface(SimulatedRobotROSInterface):
         assert self.cmd_vel.shape == (self.nv,)
 
 
+class SimulatedArmROSInterface(SimulatedRobotROSInterface):
+    """Simulated generic arm interface published on the legacy /ur10 topics."""
+
+    def __init__(self, node: Node, joint_names):
+        robot_name = "ur10"
+        super().__init__(
+            node=node,
+            nq=len(joint_names),
+            nv=len(joint_names),
+            robot_name=robot_name,
+            joint_names=joint_names,
+        )
+
+        self.cmd_sub = node.create_subscription(
+            Float64MultiArray, robot_name + "/cmd_vel", self._cmd_cb, 1
+        )
+
+    def _cmd_cb(self, msg):
+        self.cmd_vel = np.array(msg.data)
+        assert self.cmd_vel.shape == (self.nv,)
+
+
 class SimulatedMobileManipulatorROSInterface:
-    def __init__(self, node: Node):
-        self.arm = SimulatedUR10ROSInterface(node=node)
+    def __init__(self, node: Node, arm_joint_names=None):
+        if arm_joint_names is None:
+            self.arm = SimulatedUR10ROSInterface(node=node)
+        else:
+            self.arm = SimulatedArmROSInterface(
+                node=node, joint_names=arm_joint_names
+            )
         self.base = SimulatedRidgebackROSInterface(node=node)
 
         self.nq = self.arm.nq + self.base.nq

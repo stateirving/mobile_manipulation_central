@@ -152,6 +152,7 @@ class UR10ROSInterface(RobotROSInterface):
     """ROS2 interface for the UR10 arm."""
 
     def __init__(self, node: Node):
+        # the UR10 has 6 joints -> joint angles nq=6, joint velocities nv=6
         super().__init__(node=node, nq=6, nv=6)
 
         self.cmd_pub = node.create_publisher(Float64MultiArray, "/ur10/cmd_vel", 1)
@@ -178,13 +179,61 @@ class UR10ROSInterface(RobotROSInterface):
         self.cmd_pub.publish(msg)
 
 
+class ArmROSInterface(RobotROSInterface):
+    """ROS2 interface for a generic arm published on the legacy /ur10 topics."""
+
+    def __init__(self, node: Node, joint_names):
+        self.joint_names = list(joint_names)
+        super().__init__(node=node, nq=len(self.joint_names), nv=len(self.joint_names))
+        self.joint_index_map = {
+            name: index for index, name in enumerate(self.joint_names)
+        }
+
+        self.cmd_pub = node.create_publisher(Float64MultiArray, "/ur10/cmd_vel", 1)
+        self.joint_state_sub = node.create_subscription(
+            JointState, "/ur10/joint_states", self._joint_state_cb, 1
+        )
+
+    def _joint_state_cb(self, msg):
+        """Callback for arm joint feedback."""
+        if len(msg.name) == self.nq:
+            q = np.zeros(self.nq)
+            v = np.zeros(self.nv)
+            for i, name in enumerate(msg.name):
+                j = self.joint_index_map.get(name)
+                if j is None:
+                    continue
+                q[j] = msg.position[i]
+                v[j] = msg.velocity[i]
+            self.q = q
+            self.v = v
+        else:
+            self.q = np.array(msg.position)
+            self.v = np.array(msg.velocity)
+
+        assert self.q.shape == (self.nq,)
+        assert self.v.shape == (self.nv,)
+        self.joint_states_received = True
+
+    def publish_cmd_vel(self, cmd_vel, bodyframe=None):
+        """Command the velocity of the arm joints."""
+        assert cmd_vel.shape == (self.nv,)
+
+        msg = Float64MultiArray()
+        msg.data = list(cmd_vel)
+        self.cmd_pub.publish(msg)
+
+
 class MobileManipulatorROSInterface:
     """ROS2 interface to the real mobile manipulator."""
 
-    def __init__(self, node: Node):
+    def __init__(self, node: Node, arm_joint_names=None):
         self.node = node
-        self.arm = UR10ROSInterface(node)
         self.base = RidgebackROSInterface(node)
+        if arm_joint_names is None:
+            self.arm = UR10ROSInterface(node)
+        else:
+            self.arm = ArmROSInterface(node=node, joint_names=arm_joint_names)
 
         self.nq = self.arm.nq + self.base.nq
         self.nv = self.arm.nv + self.base.nv
